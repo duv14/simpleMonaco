@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monaco Editor with Luau Syntax</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #18181b;
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            min-width: 300px;
+        }
+
+        .tabs-container {
+            display: flex;
+            padding: 6px 10px 0;
+            background-color: transparent;
+            overflow-x: auto;
+            scrollbar-width: thin;
+            align-items: center;
+            white-space: nowrap;
+            min-height: 34px;
+        }
+
+        .tab {
+            width: 110px;
+            height: 32px;
+            margin: 0 5px;
+            cursor: pointer;
+            border-radius: 8px;
+            background-color: transparent;
+            color: #92908E;
+            transition: all 0.3s ease;
+            position: relative;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 10px;
+            box-sizing: border-box;
+            flex-shrink: 0;
+        }
+
+        .tab.active {
+            background-color: #18181b;
+            color: white;
+        }
+        
+        .tab-name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 80px;
+            font-size: 12px;
+        }
+
+        .tab-name-edit {
+            background: transparent;
+            border: none;
+            outline: none;
+            color: white;
+            font-size: 12px;
+            width: 80px;
+            padding: 0;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .tab-close {
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 14px;
+            line-height: 1;
+            opacity: 0.7;
+            transition: all 0.2s ease;
+        }
+
+        .tab-close:hover {
+            opacity: 1;
+        }
+
+        .add-tab {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background-color: transparent;
+            color: #92908E;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-left: 5px;
+            font-size: 20px;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+
+        .add-tab:hover {
+            color: white;
+        }
+
+        .editor-container {
+            flex-grow: 1;
+            margin-top: 6px;
+            position: relative;
+            min-height: 200px;
+        }
+
+        #editor {
+            width: 100%;
+            height: 100%;
+        }
+
+        @keyframes tabFadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes tabFadeOut {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-10px); }
+        }
+
+        .tab-enter {
+            animation: tabFadeIn 0.3s ease forwards;
+        }
+
+        .tab-exit {
+            animation: tabFadeOut 0.3s ease forwards;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #18181b;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #2A2A2A;
+        }
+    </style>
+</head>
+<body>
+    <div class="tabs-container" id="tabs-container">
+        <div class="tab active" data-file="untitled1">
+            <span class="tab-name">Untitled</span>
+            <span class="tab-close">×</span>
+        </div>
+        <div class="add-tab" id="add-tab">+</div>
+    </div>
+    <div class="editor-container">
+        <div id="editor"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs/loader.min.js"></script>
+    <script>
+        const files = {
+            'untitled1': ``
+        };
+
+        let editor;
+        let tabCounter = 1;
+        let minimapEnabled = true;
+        let lastInsertedPair = null;
+
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            monaco.languages.register({ id: 'luau' });
+
+            monaco.languages.setMonarchTokensProvider('luau', {
+                defaultToken: '',
+                tokenPostfix: '.lua',
+                keywords: [
+                    'and', 'break', 'do', 'else', 'elseif', 'end', 'false', 'for', 'function', 'if',
+                    'in', 'local', 'nil', 'not', 'or', 'repeat', 'return', 'then', 'true', 'until', 'while',
+                    'continue', 'export', 'type'
+                ],
+                typeKeywords: [],
+                operators: [
+                    '+', '-', '*', '/', '%', '^', '#', '==', '~=', '<=', '>=', '<', '>', '=',
+                    ';', ':', ',', '.', '..', '...'
+                ],
+                symbols: /[=><!~?:&|+\-*\/\^%]+/,
+                escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
+                tokenizer: {
+                    root: [
+                        [/[a-zA-Z_]\w*/, {
+                            cases: {
+                                '@keywords': 'keyword',
+                                '@default': 'identifier'
+                            }
+                        }],
+                        { include: '@whitespace' },
+                        [/[{}()\[\]]/, '@brackets'],
+                        [/@symbols/, {
+                            cases: {
+                                '@operators': 'operator',
+                                '@default': ''
+                            }
+                        }],
+                        [/\d*\.\d+([eE][\-+]?\d+)?/, 'number.float'],
+                        [/0[xX][0-9a-fA-F]+/, 'number.hex'],
+                        [/\d+/, 'number'],
+                        [/[;,.]/, 'delimiter'],
+                        [/"([^"\\]|\\.)*$/, 'string.invalid'],
+                        [/'([^'\\]|\\.)*$/, 'string.invalid'],
+                        [/"/, 'string', '@string_double'],
+                        [/'/, 'string', '@string_single'],
+                    ],
+                    whitespace: [
+                        [/[ \t\r\n]+/, ''],
+                        [/--\[([=]*)\[/, 'comment', '@comment'],
+                        [/--.*$/, 'comment'],
+                    ],
+                    comment: [
+                        [/[^\]]+/, 'comment'],
+                        [/\]([=]*)\]/, {
+                            cases: {
+                                '$1==$S2': { token: 'comment', next: '@pop' },
+                                '@default': 'comment'
+                            }
+                        }],
+                        [/./, 'comment']
+                    ],
+                    string_double: [
+                        [/[^\\"]+/, 'string'],
+                        [/@escapes/, 'string.escape'],
+                        [/\\./, 'string.escape.invalid'],
+                        [/"/, 'string', '@pop']
+                    ],
+                    string_single: [
+                        [/[^\\']+/, 'string'],
+                        [/@escapes/, 'string.escape'],
+                        [/\\./, 'string.escape.invalid'],
+                        [/'/, 'string', '@pop']
+                    ],
+                }
+            });
+
+            editor = monaco.editor.create(document.getElementById('editor'), {
+                value: files['untitled1'],
+                language: 'luau',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: {
+                    enabled: minimapEnabled
+                },
+                scrollBeyondLastLine: false,
+                fontSize: 14,
+                lineHeight: 22,
+                fontFamily: 'Consolas, "Courier New", monospace',
+                renderLineHighlight: 'all',
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: true,
+                smoothScrolling: true,
+                autoClosingBrackets: 'never',
+                autoClosingQuotes: 'never'
+            });
+
+            monaco.editor.defineTheme('luauTheme', {
+                base: 'vs-dark',
+                inherit: true,
+                rules: [],
+                colors: {
+                    'editor.background': '#18181b',
+                }
+            });
+            monaco.editor.setTheme('luauTheme');
+
+            setupAutoCompletion();
+            initTabHandlers();
+            
+            window.addEventListener('resize', function() {
+                if (editor) {
+                    editor.layout();
+                }
+            });
+            
+            // Expose functions for C# WebView2 to call
+            window.getEditorContent = function() {
+                return editor.getValue();
+            };
+            
+            window.setEditorContent = function(content) {
+                editor.setValue(content);
+            };
+            
+            // Function to call C# method (if available)
+            window.showContentInCSharp = function() {
+                const content = editor.getValue();
+                if (window.chrome && window.chrome.webview) {
+                    // WebView2 method
+                    window.chrome.webview.postMessage({
+                        type: 'showContent',
+                        content: content
+                    });
+                } else {
+                    // Fallback for testing
+                    alert('Editor Content:\n\n' + content);
+                }
+            };
+        });
+        
+        function setupAutoCompletion() {
+            const pairs = {
+                '(': ')',
+                '{': '}',
+                '[': ']',
+                '"': '"',
+                "'": "'"
+            };
+            
+            editor.onKeyDown(function(e) {
+                const selection = editor.getSelection();
+                const position = selection.getPosition();
+                
+                if (selection.isEmpty()) {
+                    if (e.browserEvent.key in pairs) {
+                        e.preventDefault();
+                        
+                        const char = e.browserEvent.key;
+                        const pair = pairs[char];
+                        
+                        const range = new monaco.Range(
+                            position.lineNumber,
+                            position.column,
+                            position.lineNumber,
+                            position.column
+                        );
+                        
+                        const op = {
+                            range: range,
+                            text: char + pair,
+                            forceMoveMarkers: true
+                        };
+                        
+                        editor.executeEdits('auto-complete', [op]);
+                        
+                        editor.setPosition({
+                            lineNumber: position.lineNumber,
+                            column: position.column + 1
+                        });
+                        
+                        lastInsertedPair = {
+                            openChar: char,
+                            closeChar: pair,
+                            position: {
+                                lineNumber: position.lineNumber,
+                                column: position.column + 1
+                            }
+                        };
+                    } else if (e.browserEvent.key === 'Backspace' && lastInsertedPair) {
+                        const currentPos = editor.getPosition();
+                        
+                        if (currentPos.lineNumber === lastInsertedPair.position.lineNumber &&
+                            currentPos.column === lastInsertedPair.position.column) {
+                            
+                            const model = editor.getModel();
+                            const lineContent = model.getLineContent(currentPos.lineNumber);
+                            const charAfterCursor = lineContent.charAt(currentPos.column - 1);
+                            
+                            if (charAfterCursor === lastInsertedPair.closeChar) {
+                                e.preventDefault();
+                                
+                                const range = new monaco.Range(
+                                    currentPos.lineNumber,
+                                    currentPos.column - 1,
+                                    currentPos.lineNumber,
+                                    currentPos.column + 1
+                                );
+                                
+                                editor.executeEdits('auto-complete', [{
+                                    range: range,
+                                    text: '',
+                                    forceMoveMarkers: true
+                                }]);
+                                
+                                lastInsertedPair = null;
+                            }
+                        }
+                    } else {
+                        lastInsertedPair = null;
+                    }
+                }
+            });
+        }
+
+        function initTabHandlers() {
+            document.addEventListener('click', function(e) {
+                if (e.target.classList.contains('tab') || 
+                    (e.target.parentElement && e.target.parentElement.classList.contains('tab') && 
+                     !e.target.classList.contains('tab-close'))) {
+                    
+                    const tab = e.target.classList.contains('tab') ? e.target : e.target.parentElement;
+                    
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    
+                    const fileName = tab.getAttribute('data-file');
+                    editor.setValue(files[fileName]);
+                }
+                
+                if (e.target.classList.contains('tab-close')) {
+                    const tab = e.target.parentElement;
+                    const fileName = tab.getAttribute('data-file');
+                    const tabsContainer = document.getElementById('tabs-container');
+                    
+                    if (document.querySelectorAll('.tab').length <= 1) {
+                        return;
+                    }
+                    
+                    if (tab.classList.contains('active')) {
+                        const nextTab = tab.nextElementSibling;
+                        const prevTab = tab.previousElementSibling;
+                        
+                        if (nextTab && nextTab.classList.contains('tab')) {
+                            nextTab.classList.add('active');
+                            editor.setValue(files[nextTab.getAttribute('data-file')]);
+                        } else if (prevTab && prevTab.classList.contains('tab')) {
+                            prevTab.classList.add('active');
+                            editor.setValue(files[prevTab.getAttribute('data-file')]);
+                        }
+                    }
+                    
+                    tab.classList.add('tab-exit');
+                    setTimeout(() => {
+                        tabsContainer.removeChild(tab);
+                    }, 280);
+                    
+                    e.stopPropagation();
+                }
+                
+                if (e.target.id === 'add-tab') {
+                    addNewTab();
+                    e.stopPropagation();
+                }
+            });
+        }
+
+        function addNewTab() {
+            tabCounter++;
+            const fileName = `untitled${tabCounter}`;
+            
+            files[fileName] = ``;
+            
+            const newTab = document.createElement('div');
+            newTab.className = 'tab tab-enter';
+            newTab.setAttribute('data-file', fileName);
+            newTab.innerHTML = `
+                <span class="tab-name">Untitled ${tabCounter}</span>
+                <span class="tab-close">×</span>
+            `;
+            
+            const addButton = document.getElementById('add-tab');
+            const tabsContainer = document.getElementById('tabs-container');
+            tabsContainer.insertBefore(newTab, addButton);
+            
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            newTab.classList.add('active');
+            editor.setValue(files[fileName]);
+            
+            setTimeout(() => {
+                newTab.classList.remove('tab-enter');
+            }, 300);
+            
+            newTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
+    </script>
+</body>
+</html>
